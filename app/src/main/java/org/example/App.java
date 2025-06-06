@@ -3,8 +3,19 @@
  */
 package org.example;
 
+import javafx.application.Application;
+import javafx.application.Platform;
+import javafx.scene.Scene;
+import javafx.scene.chart.LineChart;
+import javafx.scene.chart.NumberAxis;
+import javafx.scene.chart.XYChart;
+import javafx.stage.Stage;
+import javafx.scene.layout.VBox;
+import javafx.scene.control.Label;
+
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -12,13 +23,18 @@ import java.util.TimerTask;
 import yahoofinance.YahooFinance;
 import yahoofinance.Stock;
 
-public class App {
+public class App extends Application {
     private final ConcurrentLinkedQueue<StockData> stockDataQueue;
     private static final String TICKER = "^DJI"; // Dow Jones Industrial Average ticker
-    private static final long UPDATE_INTERVAL = 60000; // 1 minute in milliseconds
+    private static final long UPDATE_INTERVAL = 5000; // 5 seconds in milliseconds
+    private LineChart<Number, Number> lineChart;
+    private XYChart.Series<Number, Number> series;
+    private Label statusLabel;
+    private long startTime;
 
     public App() {
         this.stockDataQueue = new ConcurrentLinkedQueue<>();
+        this.startTime = System.currentTimeMillis();
     }
 
     private static class StockData {
@@ -46,33 +62,66 @@ public class App {
                 StockData data = new StockData(price, timestamp);
                 stockDataQueue.offer(data);
                 
-                System.out.println("New data added: " + data);
-                System.out.println("Queue size: " + stockDataQueue.size());
+                // Update the chart on the JavaFX Application Thread
+                Platform.runLater(() -> {
+                    long timeElapsed = (System.currentTimeMillis() - startTime) / 1000;
+                    series.getData().add(new XYChart.Data<>(timeElapsed, price.doubleValue()));
+                    statusLabel.setText(String.format("Latest Price: $%.2f at %s", 
+                        price.doubleValue(), 
+                        timestamp.format(DateTimeFormatter.ofPattern("HH:mm:ss"))));
+                });
             } else {
-                System.err.println("Unable to fetch stock data for " + TICKER);
+                Platform.runLater(() -> 
+                    statusLabel.setText("Unable to fetch stock data for " + TICKER));
             }
         } catch (Exception e) {
-            System.err.println("Error fetching stock price: " + e.getMessage());
+            Platform.runLater(() -> 
+                statusLabel.setText("Error: " + e.getMessage()));
         }
     }
 
-    public static void main(String[] args) {
-        App app = new App();
-        
-        // Create a timer to fetch stock price every 5 seconds
+    @Override
+    public void start(Stage primaryStage) {
+        // Create the chart
+        NumberAxis xAxis = new NumberAxis();
+        xAxis.setLabel("Time (seconds)");
+        NumberAxis yAxis = new NumberAxis();
+        yAxis.setLabel("Stock Price ($)");
+
+        lineChart = new LineChart<>(xAxis, yAxis);
+        lineChart.setTitle("Dow Jones Industrial Average Stock Price");
+        lineChart.setCreateSymbols(false);
+
+        // Create the series for the chart
+        series = new XYChart.Series<>();
+        series.setName("Stock Price");
+        lineChart.getData().add(series);
+
+        // Create status label
+        statusLabel = new Label("Fetching stock data...");
+        statusLabel.setStyle("-fx-font-size: 14px; -fx-padding: 10px;");
+
+        // Create the layout
+        VBox root = new VBox(10, lineChart, statusLabel);
+        root.setStyle("-fx-padding: 10px;");
+
+        // Create the scene
+        Scene scene = new Scene(root, 800, 600);
+        primaryStage.setTitle("Stock Price Monitor");
+        primaryStage.setScene(scene);
+        primaryStage.show();
+
+        // Start the timer to fetch stock prices
         Timer timer = new Timer();
         timer.scheduleAtFixedRate(new TimerTask() {
             @Override
             public void run() {
-                app.fetchAndStoreStockPrice();
+                fetchAndStoreStockPrice();
             }
         }, 0, UPDATE_INTERVAL);
+    }
 
-        // Keep the application running
-        try {
-            Thread.currentThread().join();
-        } catch (InterruptedException e) {
-            System.err.println("Application interrupted: " + e.getMessage());
-        }
+    public static void main(String[] args) {
+        launch(args);
     }
 }
